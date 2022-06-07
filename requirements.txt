@@ -1,0 +1,5 @@
+Flask==2.1.0
+python-telegram-bot
+google-cloud-vision
+requests
+pillow
