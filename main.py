@@ -3,8 +3,7 @@ import string
 import random
 import logging
 
-from PIL import Image, ImageDraw, ImageFont
-from google.cloud import vision
+from cat_dog_detector import CatDogDetector
 from telegram import Update, ForceReply
 from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
 
@@ -16,75 +15,48 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-IMAGE_LIB = 'images'
-
-
-class CatDetector:
-    LABELS = ["Cat", "Dog", "Animal"]
-    COLOURS = ["Cat"]
-
-    def detect(self, filename) -> list:
-        with open(filename, 'rb') as user_image:
-            content = user_image.read()
-        image = vision.Image(content=content)
-        client = vision.ImageAnnotatorClient()
-        objects = client.object_localization(image=image).localized_object_annotations
-        result = []
-        if len(objects) > 0:
-            with Image.open(filename) as im:
-                size = im.size
-                draw = ImageDraw.Draw(im)
-                font = ImageFont.truetype("open_sans.ttf", 18)
-                for object_ in objects:
-                    if object_.name in self.LABELS:
-                        vertexes = []
-                        result.append((object_.name, object_.score))
-                        for vertex in object_.bounding_poly.normalized_vertices:
-                            vertexes.append((size[0] * vertex.x, size[1] * vertex.y))
-                        draw.rectangle((vertexes[0], vertexes[2]), outline=128)
-                        draw.text(vertexes[0], f"{object_.name} {round(object_.score, 3)}", (252, 3, 78), font=font)
-                im.save(filename)
-        return result
+IMAGE_DIR = 'images'
+LENGTH = 10
 
 
 def start(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /start is issued."""
     user = update.effective_user
     update.message.reply_markdown_v2(
-        fr'Hi {user.mention_markdown_v2()}\!',
+        fr'Hi {user.mention_markdown_v2()}\! Load your image and I\'ll check cats on it',
         reply_markup=ForceReply(selective=True),
     )
 
 
 def help_command(update: Update, context: CallbackContext) -> None:
     """Send a message when the command /help is issued."""
-    update.message.reply_text('Help!')
+    update.message.reply_text('Load your image and I\'ll check cats on it!')
 
 
-def photo(update: Update, context: CallbackContext) -> None:
-    """Stores the photo and asks for a location."""
-    user = update.message.from_user
+def generate_filename():
+    """generates random filename for one session use"""
     letters = string.ascii_lowercase
-    LEN = 10
-    filename = ''.join(random.choice(letters) for _ in range(LEN))
-    filename = f"{IMAGE_LIB}/{filename}.jpg"
+    filename = ''.join(random.choice(letters) for _ in range(LENGTH))
+    filename = f"{IMAGE_DIR}/{filename}.jpg"
+    return filename
+
+
+def image(update: Update, context: CallbackContext) -> None:
+    """Stores the image and asks for a location."""
+    user = update.message.from_user
+    filename = generate_filename()
     photo_file = update.message.photo[-1].get_file()
     photo_file.download(filename)
     logger.info("Photo of %s: %s", user.first_name, filename)
     update.message.reply_text('Got image')
 
-    detector = CatDetector()
+    detector = CatDogDetector()
     objects = detector.detect(filename)
 
     update.message.reply_photo(photo=open(filename, 'rb'))
     for object, score in objects:
         update.message.reply_text("{} confidence: {}".format(object, score))
     os.remove(filename)
-
-
-def echo(update: Update, context: CallbackContext) -> None:
-    """Echo the user message."""
-    update.message.reply_text("Uploading image")
 
 
 def main() -> None:
@@ -100,14 +72,10 @@ def main() -> None:
     dispatcher.add_handler(CommandHandler("start", start))
     dispatcher.add_handler(CommandHandler("help", help_command))
 
-    dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, echo))
-    dispatcher.add_handler(MessageHandler(Filters.photo, photo))
+    dispatcher.add_handler(MessageHandler(Filters.photo, image))
 
     updater.start_polling()
 
-    # Run the bot until you press Ctrl-C or the process receives SIGINT,
-    # SIGTERM or SIGABRT. This should be used most of the time, since
-    # start_polling() is non-blocking and will stop the bot gracefully.
     updater.idle()
 
 
